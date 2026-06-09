@@ -14,9 +14,6 @@ def _input(prompt, tipo=str):
 
 
 
-
-
-
 def cadastrar_usuario(conn, cursor, IDUsuario, nome, sobrenome, data_nascimento, email, telefone):
     try:
         cursor.execute(
@@ -189,7 +186,7 @@ def visualizar_usuario(cursor, IDUsuario):
 
 
 
-def avaliar_servico(conn, cursor, IDServico, tipo_avaliado, nota, descricao):
+def avaliar_servico(conn, cursor, IDServico, nota, descricao):
     try:
         cursor.execute("SELECT COALESCE(MAX(IDAvaliacao), 0) + 1 FROM AVALIACAO")
         novo_id = cursor.fetchone()[0]
@@ -197,20 +194,10 @@ def avaliar_servico(conn, cursor, IDServico, tipo_avaliado, nota, descricao):
         cursor.execute(
             "INSERT INTO AVALIACAO (IDAvaliacao, TipoAvaliado, NotaAvaliacao, DescricaoAvaliacao, IDServico) "
             "VALUES (%s, %s, %s, %s, %s)",
-            (novo_id, tipo_avaliado, nota, descricao, IDServico))
+            (novo_id, "Motorista", nota, descricao, IDServico))
         conn.commit()
         print(f"\n  Avaliação #{novo_id} registrada!")
-
-        if tipo_avaliado == "Motorista":
-            cursor.execute("SELECT IDMotorista FROM SERVICO WHERE IDServico = %s", (IDServico,))
-            row = cursor.fetchone()
-            if row:
-                atualizar_nota_motorista(conn, cursor, row[0])
-        else:
-            cursor.execute("SELECT IDPassageiro FROM CORRIDA WHERE IDServico = %s", (IDServico,))
-            row = cursor.fetchone()
-            if row:
-                atualizar_nota_passageiro(conn, cursor, row[0])
+        print("  Use a opção 5 para recalcular a nota do motorista.")
 
     except Exception as e:
         conn.rollback()
@@ -240,30 +227,6 @@ def atualizar_nota_motorista(conn, cursor, IDMotorista):
         conn.rollback()
         print(f"\n  Erro ao atualizar nota do motorista: {e}")
 
-
-def atualizar_nota_passageiro(conn, cursor, IDPassageiro):
-    try:
-        cursor.execute("""
-            SELECT ROUND(AVG(a.NotaAvaliacao)::NUMERIC, 2)
-            FROM AVALIACAO a
-            JOIN SERVICO s   ON s.IDServico  = a.IDServico
-            JOIN CORRIDA cor ON cor.IDServico = s.IDServico
-            WHERE cor.IDPassageiro = %s
-              AND a.TipoAvaliado = 'Solicitante'
-        """, (IDPassageiro,))
-
-        resultado = cursor.fetchone()
-        nova_nota = float(resultado[0]) if resultado and resultado[0] is not None else 5.00
-
-        cursor.execute(
-            "UPDATE PASSAGEIRO SET NotaPassageiro = %s WHERE IDPassageiro = %s",
-            (nova_nota, IDPassageiro))
-        conn.commit()
-        print(f"\n  Nota do passageiro {IDPassageiro} atualizada para {nova_nota:.2f}.")
-
-    except Exception as e:
-        conn.rollback()
-        print(f"\n  Erro ao atualizar nota do passageiro: {e}")
 
 
 def deletar_usuario(conn, cursor, IDUsuario):
@@ -328,10 +291,9 @@ if __name__ == "__main__":
 ║  1. Cadastrar usuário                    ║
 ║  2. Visualizar usuário                   ║
 ║  3. Ver serviços de um motorista         ║
-║  4. Avaliar serviço                      ║
+║  4. Avaliar motorista                    ║
 ║  5. Recalcular nota de motorista         ║
-║  6. Recalcular nota de passageiro        ║
-║  7. Deletar usuário                      ║
+║  6. Deletar usuário                      ║
 ║  0. Sair                                 ║
 ╚══════════════════════════════════════════╝""")
 
@@ -375,46 +337,28 @@ if __name__ == "__main__":
                     servicos_motorista(cursor, _input("ID do motorista", int))
 
                 case "4":
-                    print("\n─── AVALIAR USUÁRIO ───")
-                    quem = input("  Avaliar (M) Motorista / (S) Solicitante: ").strip().upper()
-                    if quem not in ("M", "S"):
-                        print("\n  Opção inválida.")
+                    print("\n─── AVALIAR MOTORISTA ───")
+                    id_motorista = _input("ID do motorista", int)
+                    cursor.execute(
+                        "SELECT IDServico FROM SERVICO WHERE IDMotorista = %s "
+                        "ORDER BY DataHora DESC LIMIT 1",
+                        (id_motorista,))
+                    row = cursor.fetchone()
+                    if not row:
+                        print("\n  Nenhum serviço encontrado para esse motorista.")
                     else:
-                        id_avaliado = _input("ID do usuário a avaliar", int)
-
-                        if quem == "M":
-                            cursor.execute(
-                                "SELECT IDServico FROM SERVICO WHERE IDMotorista = %s "
-                                "ORDER BY DataHora DESC LIMIT 1",
-                                (id_avaliado,))
+                        nota = _input("Nota (1 a 5)", int)
+                        if nota not in range(1, 6):
+                            print("\n  Nota deve ser entre 1 e 5.")
                         else:
-                            cursor.execute(
-                                "SELECT s.IDServico FROM SERVICO s "
-                                "JOIN CORRIDA cor ON cor.IDServico = s.IDServico "
-                                "WHERE cor.IDPassageiro = %s ORDER BY s.DataHora DESC LIMIT 1",
-                                (id_avaliado,))
-
-                        row = cursor.fetchone()
-                        if not row:
-                            print("\n  Nenhum serviço encontrado para esse usuário.")
-                        else:
-                            nota = _input("Nota (1 a 5)", int)
-                            if nota not in range(1, 6):
-                                print("\n  Nota deve ser entre 1 e 5.")
-                            else:
-                                desc = input("  Descrição (opcional, Enter para pular): ").strip() or None
-                                tipo_av = "Motorista" if quem == "M" else "Solicitante"
-                                avaliar_servico(conn, cursor, row[0], tipo_av, nota, desc)
+                            desc = input("  Descrição (opcional, Enter para pular): ").strip() or None
+                            avaliar_servico(conn, cursor, row[0], nota, desc)
 
                 case "5":
                     print("\n─── RECALCULAR NOTA — MOTORISTA ───")
                     atualizar_nota_motorista(conn, cursor, _input("ID do motorista", int))
 
                 case "6":
-                    print("\n─── RECALCULAR NOTA — PASSAGEIRO ───")
-                    atualizar_nota_passageiro(conn, cursor, _input("ID do passageiro", int))
-
-                case "7":
                     print("\n─── DELETAR USUÁRIO ───")
                     id_u = _input("ID do usuário", int)
                     conf = input(
@@ -431,7 +375,7 @@ if __name__ == "__main__":
                     break
 
                 case _:
-                    print("\n  Opção inválida.")
+                    print("\n  Opção inválida. Tente novamente.")
 
     finally:
         disconnect(conn)
